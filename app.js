@@ -11,11 +11,17 @@ process.stdin.resume();
 
 // Files and folders
 const songDir = './songs';
+const favFile = './favorites.json';
 const port = 4212;
 
 // Get songs
 let songs = fs.readdirSync(songDir)
     .filter(s => s.toLowerCase().endsWith('.mp3'));
+
+// Load favorites
+let favorites = fs.existsSync(favFile)
+    ? JSON.parse(fs.readFileSync(favFile, 'utf8') || '[]')
+    : [];
 
 // Player variables
 let current = 0;
@@ -28,6 +34,7 @@ let paused = false;
 let shuffle = false;
 let repeat = false;
 let stopped = true;
+let inFavorites = false;
 
 // Check songs
 if (songs.length === 0) {
@@ -40,6 +47,14 @@ function clear() {
     process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
 }
 
+// Save favorites
+function saveFavorites() {
+    fs.writeFileSync(
+        favFile,
+        JSON.stringify(favorites, null, 2)
+    );
+}
+
 // Main screen
 function show() {
     clear();
@@ -49,8 +64,10 @@ function show() {
     console.log('====================================\n');
 
     songs.forEach((song, i) => {
+        let fav = favorites.includes(song) ? ' ❤️' : '';
+
         console.log(
-            `${i === current ? '  >' : '   '} ${i + 1}. ${song}`
+            `${i === current ? '  >' : '   '} ${i + 1}. ${song}${fav}`
         );
     });
 
@@ -59,6 +76,7 @@ function show() {
     console.log('P Pause       S Stop');
     console.log('N Next        B Previous');
     console.log('H Shuffle     R Repeat');
+    console.log('F Favorite    L Favorites');
     console.log('E Exit');
     console.log('------------------------------------');
 
@@ -72,6 +90,25 @@ function show() {
 
     console.log(`🔀 Shuffle: ${shuffle ? 'ON' : 'OFF'}`);
     console.log(`🔁 Repeat: ${repeat ? 'ON' : 'OFF'}`);
+}
+
+// Favorites screen
+function showFavorites() {
+    clear();
+
+    console.log('====================================');
+    console.log('          ❤️ FAVORITES');
+    console.log('====================================\n');
+
+    if (favorites.length) {
+        favorites.forEach((song, i) => {
+            console.log(`❤️ ${i + 1}. ${song}`);
+        });
+    } else {
+        console.log('No favorite songs yet.');
+    }
+
+    console.log('\nPress any key to return');
 }
 
 // Send VLC command
@@ -225,6 +262,13 @@ process.stdin.on('data', data => {
         return;
     }
 
+    // Return from favorites
+    if (inFavorites) {
+        inFavorites = false;
+        show();
+        return;
+    }
+
     // UP
     if (data[2] === 0x41) {
         if (current > 0) {
@@ -297,6 +341,34 @@ process.stdin.on('data', data => {
         repeat = !repeat;
 
         show();
+
+        return;
+    }
+
+    // F = Favorite
+    if (key === 'f') {
+        let song = songs[current];
+
+        let index = favorites.indexOf(song);
+
+        if (index === -1) {
+            favorites.push(song);
+        } else {
+            favorites.splice(index, 1);
+        }
+
+        saveFavorites();
+
+        show();
+
+        return;
+    }
+
+    // L = Favorites
+    if (key === 'l') {
+        inFavorites = true;
+
+        showFavorites();
 
         return;
     }
