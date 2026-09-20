@@ -25,6 +25,8 @@ let connected = false;
 
 // Player states
 let paused = false;
+let shuffle = false;
+let repeat = false;
 let stopped = true;
 
 // Check songs
@@ -56,6 +58,7 @@ function show() {
     console.log('↑ ↓ Select    Enter Play');
     console.log('P Pause       S Stop');
     console.log('N Next        B Previous');
+    console.log('H Shuffle     R Repeat');
     console.log('E Exit');
     console.log('------------------------------------');
 
@@ -66,6 +69,9 @@ function show() {
     } else {
         console.log('\n⏹ STOPPED');
     }
+
+    console.log(`🔀 Shuffle: ${shuffle ? 'ON' : 'OFF'}`);
+    console.log(`🔁 Repeat: ${repeat ? 'ON' : 'OFF'}`);
 }
 
 // Send VLC command
@@ -150,10 +156,27 @@ function stop() {
 
 // Next song
 function nextSong() {
-    current++;
+    if (repeat) {
+        play(songs[current]);
+        return;
+    }
 
-    if (current >= songs.length) {
-        current = 0;
+    if (shuffle && songs.length > 1) {
+        let next;
+
+        do {
+            next = Math.floor(
+                Math.random() * songs.length
+            );
+        } while (next === current);
+
+        current = next;
+    } else {
+        current++;
+
+        if (current >= songs.length) {
+            current = 0;
+        }
     }
 
     play(songs[current]);
@@ -257,6 +280,24 @@ process.stdin.on('data', data => {
     // B = Previous
     if (key === 'b') {
         previousSong();
+        return;
+    }
+
+    // H = Shuffle
+    if (key === 'h') {
+        shuffle = !shuffle;
+
+        show();
+
+        return;
+    }
+
+    // R = Repeat
+    if (key === 'r') {
+        repeat = !repeat;
+
+        show();
+
         return;
     }
 });
