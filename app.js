@@ -4,6 +4,8 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
+const path = require('path');
+const { pathToFileURL } = require('url');
 
 // Keyboard input
 process.stdin.setRawMode(true);
@@ -36,6 +38,12 @@ let repeat = false;
 let stopped = true;
 let inFavorites = false;
 
+// Progress variables
+let duration = 0;
+let progress = 0;
+let timer = null;
+let syncTimer = null;
+
 // Check songs
 if (songs.length === 0) {
     console.log('No MP3 files found in songs folder.');
@@ -53,6 +61,28 @@ function saveFavorites() {
         favFile,
         JSON.stringify(favorites, null, 2)
     );
+}
+
+// Convert seconds to MM:SS
+function time(sec) {
+    sec = Math.max(0, Math.floor(sec));
+
+    return `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+// Progress bar
+function bar() {
+    if (!duration) {
+        return '[--------------------]';
+    }
+
+    let filled = Math.floor(
+        (progress / duration) * 20
+    );
+
+    filled = Math.max(0, Math.min(20, filled));
+
+    return `[${'█'.repeat(filled)}${'░'.repeat(20 - filled)}]`;
 }
 
 // Main screen
@@ -83,6 +113,10 @@ function show() {
     if (!stopped) {
         console.log(
             `\n${paused ? '⏸ PAUSED' : '▶ PLAYING'}: ${songs[current]}`
+        );
+
+        console.log(
+            `${bar()} ${time(progress)} / ${time(duration)}`
         );
     } else {
         console.log('\n⏹ STOPPED');
@@ -166,25 +200,142 @@ function connectVLC() {
     });
 }
 
+// Get value from VLC
+function getValue(commandName, callback) {
+    if (
+        !client ||
+        !connected ||
+        client.destroyed
+    ) {
+        return;
+    }
+
+    let data = '';
+
+    function receive(chunk) {
+        data += chunk.toString();
+
+        let lines = data.split(/\r?\n/);
+
+        for (let line of lines) {
+            line = line.trim();
+
+            if (/^\d+(\.\d+)?$/.test(line)) {
+                client.off('data', receive);
+                callback(Number(line));
+                return;
+            }
+        }
+    }
+
+    client.on('data', receive);
+
+    client.write(commandName + '\n');
+
+    setTimeout(() => {
+        client.off('data', receive);
+    }, 500);
+}
+
+// Get actual position from VLC
+function syncProgress() {
+    if (
+        stopped ||
+        paused ||
+        !connected
+    ) {
+        return;
+    }
+
+    getValue('get_length', length => {
+        if (length > 0) {
+            duration = length;
+        }
+
+        getValue('get_time', currentTime => {
+            progress = currentTime;
+        });
+    });
+}
+
+// Smooth progress animation
+function startTimer() {
+    stopTimer();
+
+    progress = 0;
+
+    syncTimer = setInterval(() => {
+        syncProgress();
+    }, 1000);
+
+    timer = setInterval(() => {
+        if (
+            !paused &&
+            !stopped &&
+            duration > 0
+        ) {
+            progress += 0.1;
+
+            if (progress >= duration) {
+                progress = duration;
+                nextSong();
+                return;
+            }
+
+            show();
+        }
+    }, 100);
+}
+
+// Stop timers
+function stopTimer() {
+    if (timer) {
+        clearInterval(timer);
+        timer = null;
+    }
+
+    if (syncTimer) {
+        clearInterval(syncTimer);
+        syncTimer = null;
+    }
+}
+
 // Play song
 function play(song) {
     if (!connected) return;
 
     stopped = false;
     paused = false;
+    progress = 0;
+    duration = 0;
+
+    stopTimer();
 
     command('stop');
     command('clear');
 
-    command(`add ${songDir}/${song}`);
+    let file = pathToFileURL(
+        path.resolve(songDir, song)
+    ).href;
+
+    command(`add ${file}`);
 
     show();
+
+    setTimeout(() => {
+        syncProgress();
+        startTimer();
+    }, 700);
 }
 
 // Stop song
 function stop() {
     stopped = true;
     paused = false;
+    progress = 0;
+    duration = 0;
+
+    stopTimer();
 
     command('stop');
 
@@ -198,7 +349,12 @@ function nextSong() {
         return;
     }
 
-    if (shuffle && songs.length > 1) {
+    if (songs.length === 0) return;
+
+    if (
+        shuffle &&
+        songs.length > 1
+    ) {
         let next;
 
         do {
@@ -232,6 +388,8 @@ function previousSong() {
 
 // Exit
 function exit() {
+    stopTimer();
+
     command('stop');
     command('quit');
 
@@ -303,6 +461,10 @@ process.stdin.on('data', data => {
         command('pause');
 
         paused = !paused;
+
+        if (!paused) {
+            syncProgress();
+        }
 
         show();
 
